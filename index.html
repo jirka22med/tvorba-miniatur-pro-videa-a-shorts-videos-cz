@@ -141,6 +141,8 @@ svg.i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke
     <div class="seg" role="group" aria-label="Formát plátna">
       <button type="button" data-fmt="16:9" aria-pressed="true">16:9</button>
       <button type="button" data-fmt="9:16" aria-pressed="false">9:16</button>
+      <button type="button" data-fmt="banner" aria-pressed="false" title="Banner kanálu 2560 × 1440">Banner</button>
+      <button type="button" data-fmt="avatar" aria-pressed="false" title="Profilovka kanálu 800 × 800">Profilovka</button>
     </div>
     <div class="grp">
       <button type="button" class="btn ic" id="undo" title="Zpět (Ctrl+Z)" aria-label="Zpět"><svg class="i" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></button>
@@ -158,7 +160,9 @@ svg.i{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke
         <button type="button" class="chip" data-guide="thirds" aria-pressed="false">Třetiny</button>
         <button type="button" class="chip" data-guide="center" aria-pressed="false">Středy</button>
         <button type="button" class="chip" data-guide="safe" aria-pressed="false">Bezpečný okraj</button>
-        <button type="button" class="chip" data-guide="yt" aria-pressed="false">Rozhraní YouTube</button>
+        <button type="button" class="chip" data-guide="yt" data-only="video" aria-pressed="false">Rozhraní YouTube</button>
+        <button type="button" class="chip" data-guide="banner" data-only="banner" aria-pressed="false" hidden>Zóny banneru</button>
+        <button type="button" class="chip" data-guide="avatar" data-only="avatar" aria-pressed="false" hidden>Kruhová maska</button>
         <div class="zoom">
           <button type="button" class="btn sm" id="zout" aria-label="Oddálit">−</button>
           <output class="mono" id="zval">Fit</output>
@@ -194,7 +198,9 @@ const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const rad=d=>d*Math.PI/180;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let _id=0; const nid=()=>'o'+(++_id)+Math.random().toString(36).slice(2,6);
-const FORMATS={'16:9':{W:1280,H:720},'9:16':{W:720,H:1280}};
+const FORMATS={'16:9':{W:1280,H:720},'9:16':{W:720,H:1280},'banner':{W:2560,H:1440},'avatar':{W:800,H:800}};
+const fmtCat=()=>S.fmt==='banner'?'banner':S.fmt==='avatar'?'avatar':'video';
+const BAN={stripH:423,safeW:1546,tabW:1855};   // YouTube: viditelný pruh, bezpečná zóna (mobil), tablet
 const FONTS=['JetBrains Mono','Anton','Bebas Neue','Oswald','Montserrat','Poppins','Archivo Black','Bangers','Roboto Condensed','Barlow Condensed','Playfair Display','Lobster'];
 const BLENDS=[['source-over','Normální'],['multiply','Násobení'],['screen','Zesvětlení (screen)'],['overlay','Překrytí'],['soft-light','Jemné světlo'],['hard-light','Ostré světlo'],['lighten','Světlejší'],['darken','Tmavší'],['color-dodge','Projasnění'],['difference','Rozdíl'],['hue','Odstín'],['luminosity','Svítivost']];
 const SHAPES=[['rect','Obdélník'],['round','Zaoblený'],['ellipse','Elipsa'],['tri','Trojúhelník'],['star','Hvězda'],['arrow','Šipka'],['line','Čára'],
@@ -401,18 +407,21 @@ const cv=$('#cv'),ov=$('#ov'),cwrap=$('#cwrap'),stage=$('#stage');
 const cctx=cv.getContext('2d'),octx=ov.getContext('2d');
 let raf=0;
 const req=()=>{if(!raf)raf=requestAnimationFrame(()=>{raf=0;draw();});};
-function draw(){RS=1;measureAll();render(cctx,S.W,S.H);drawOverlay();}
+function draw(){const pk=view.pk||1;RS=pk;measureAll();cctx.setTransform(pk,0,0,pk,0,0);render(cctx,S.W,S.H);RS=1;drawOverlay();}
 const fitZ=()=>clamp(Math.min((stage.clientWidth-32)/S.W,(stage.clientHeight-32)/S.H),.1,4);
 function layout(){
   view.z=view.zoom==='fit'?fitZ():view.zoom;
   const w=Math.max(40,Math.round(S.W*view.z)),h=Math.max(40,Math.round(S.H*view.z)),dpr=window.devicePixelRatio||1;
   cwrap.style.width=w+'px';cwrap.style.height=h+'px';
-  if(cv.width!==S.W||cv.height!==S.H){cv.width=S.W;cv.height=S.H;}
+  view.pk=Math.min(1,(w*dpr)/S.W);   // náhled se kreslí jen v rozlišení obrazovky, export vždy v plné velikosti
+  const cw=Math.max(1,Math.round(S.W*view.pk)),ch=Math.max(1,Math.round(S.H*view.pk));
+  if(cv.width!==cw||cv.height!==ch){cv.width=cw;cv.height=ch;}
   cv.style.width=w+'px';cv.style.height=h+'px';
   ov.width=Math.round(w*dpr);ov.height=Math.round(h*dpr);ov.style.width=w+'px';ov.style.height=h+'px';
   $('#zval').textContent=(view.zoom==='fit'?'Fit ':'')+Math.round(view.z*100)+' %';
   $('#sizeinfo').textContent=`${S.W} × ${S.H} px`;
   $$('[data-fmt]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.fmt===S.fmt)));
+  syncChips();
   req();
 }
 function setZoom(z){view.zoom=z;layout();}
@@ -458,6 +467,29 @@ function drawOverlay(){
     for(const f of[1/3,2/3]){g.moveTo(W*f,0);g.lineTo(W*f,H);g.moveTo(0,H*f);g.lineTo(W,H*f);}g.stroke();}
   if(gv.center){g.strokeStyle='rgba(90,220,255,.8)';g.setLineDash([]);g.beginPath();g.moveTo(W/2,0);g.lineTo(W/2,H);g.moveTo(0,H/2);g.lineTo(W,H/2);g.stroke();}
   if(gv.safe){g.strokeStyle='rgba(255,210,63,.9)';g.setLineDash([8*u,6*u]);g.strokeRect(W*.05,H*.05,W*.9,H*.9);}
+  if(gv.banner&&S.fmt==='banner'){
+    const sh=BAN.stripH,y0=(H-sh)/2,sw=BAN.safeW,tw=BAN.tabW;
+    g.setLineDash([]);
+    g.fillStyle='rgba(0,0,0,.55)';g.fillRect(0,0,W,y0);g.fillRect(0,y0+sh,W,H-y0-sh);
+    g.fillStyle='rgba(0,0,0,.28)';g.fillRect(0,y0,(W-tw)/2,sh);g.fillRect((W+tw)/2,y0,(W-tw)/2,sh);
+    g.lineWidth=2*u;g.strokeStyle='rgba(255,255,255,.75)';g.strokeRect(0,y0,W,sh);
+    g.setLineDash([10*u,7*u]);g.strokeStyle='rgba(120,200,255,.95)';g.beginPath();
+    g.moveTo((W-tw)/2,y0);g.lineTo((W-tw)/2,y0+sh);g.moveTo((W+tw)/2,y0);g.lineTo((W+tw)/2,y0+sh);g.stroke();
+    g.setLineDash([]);g.strokeStyle='rgba(255,210,63,.98)';g.strokeRect((W-sw)/2,y0,sw,sh);
+    g.font=`600 ${13*u}px sans-serif`;g.fillStyle='#fff';
+    g.textBaseline='bottom';g.textAlign='left';g.fillText('POČÍTAČ · celý pruh 2560 × 423',8*u,y0-8*u);
+    g.textAlign='right';g.fillStyle='rgba(150,215,255,1)';g.fillText('TABLET · 1855 × 423 (čárkovaně)',W-8*u,y0-8*u);
+    g.textBaseline='top';g.textAlign='center';g.fillStyle='rgba(255,215,80,1)';g.fillText('MOBIL A BEZPEČNÁ ZÓNA · 1546 × 423 · sem patří text a logo',W/2,y0+sh+8*u);
+    g.textBaseline='bottom';g.textAlign='left';g.fillStyle='rgba(255,255,255,.85)';g.fillText('TV zobrazí celý obrázek 2560 × 1440',8*u,H-8*u);
+    g.textAlign='start';
+  }
+  if(gv.avatar&&S.fmt==='avatar'){
+    g.setLineDash([]);g.fillStyle='rgba(0,0,0,.62)';
+    g.beginPath();g.rect(0,0,W,H);g.arc(W/2,H/2,W/2,0,Math.PI*2,true);g.fill('evenodd');
+    g.strokeStyle='rgba(255,210,63,.98)';g.lineWidth=2*u;g.beginPath();g.arc(W/2,H/2,W/2-u,0,Math.PI*2);g.stroke();
+    g.font=`600 ${13*u}px sans-serif`;g.fillStyle='rgba(255,215,80,1)';g.textAlign='center';g.textBaseline='bottom';
+    g.fillText('YouTube ukáže jen kruh · zobrazí se 98 × 98 px',W/2,H-8*u);g.textAlign='start';
+  }
   if(gv.yt){
     const zones=W>H?[[.86,.86,.14,.14,'čas videa']]:[[0,0,1,.06,'stavový řádek'],[.84,.42,.16,.46,'tlačítka'],[0,.86,1,.14,'název a kanál']];
     g.setLineDash([]);g.font=`600 ${12*u}px sans-serif`;g.textBaseline='top';
@@ -588,7 +620,8 @@ function doMove(o,p,e,u){
   view.snap=[];
   if(!e.altKey){
     const W=S.W,H=S.H,th=7*u,m=view.guides.safe;
-    const xs=[0,W/2,W].concat(m?[W*.05,W*.95]:[]),ys=[0,H/2,H].concat(m?[H*.05,H*.95]:[]);
+    const bn=view.guides.banner&&S.fmt==='banner';
+    const xs=[0,W/2,W].concat(m?[W*.05,W*.95]:[],bn?[(W-BAN.safeW)/2,(W+BAN.safeW)/2]:[]),ys=[0,H/2,H].concat(m?[H*.05,H*.95]:[],bn?[(H-BAN.stripH)/2,(H+BAN.stripH)/2]:[]);
     const pick=(vals,targets)=>{let b=null;for(const v of vals)for(const t of targets){const d=t-v;if(Math.abs(d)<th&&(!b||Math.abs(d)<Math.abs(b.d)))b={d,t};}return b;};
     const bx=pick([nx,nx+o.w/2,nx+o.w],xs),by=pick([ny,ny+o.h/2,ny+o.h],ys);
     if(bx){nx+=bx.d;view.snap.push({x:bx.t});}
@@ -630,7 +663,7 @@ document.addEventListener('keydown',e=>{
   if(mod&&k==='d'){e.preventDefault();dupSel();return;}
   if(mod&&k==='c'&&o){e.preventDefault();copySel();return;}
   if(mod&&k==='v'&&clip){e.preventDefault();pasteSel();return;}
-  if(mod&&k==='s'){e.preventDefault();tab='export';renderPane();return;}
+  if(mod&&k==='s'){e.preventDefault();saveImage();return;}
   if(!o)return;
   if(k==='delete'||k==='backspace'){e.preventDefault();delSel();return;}
   if(k==='escape'){select(null);return;}
@@ -699,7 +732,7 @@ function renderPane(){
   if(tab==='export'){syncExport();updateSize();}
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-tab]');if(b){tab=b.dataset.tab;renderPane();}});
-$('#goExport').onclick=()=>{tab='export';renderPane();$('#pane').scrollIntoView({block:'nearest'});};
+$('#goExport').onclick=()=>saveImage();
 
 /* ---------- tab: add ---------- */
 const TEXT_PRESETS=[
@@ -739,12 +772,13 @@ function paneAdd(){
   +sec('Tvary',`<div class="tiles">${SHAPES.map(s=>`<button type="button" class="tile" data-add="shape" data-v="${s[0]}" title="${s[1]}" aria-label="${s[1]}"><svg viewBox="0 0 32 32">${SHAPE_SVG[s[0]]}</svg></button>`).join('')}</div>`)
   +sec('Nálepky',`<div class="tiles">${STICKERS.map(s=>`<button type="button" class="tile" data-add="sticker" data-v="${s}">${s}</button>`).join('')}</div>`);
 }
-const TPL_CATS=['Základ','Star Trek','YouTube','Zábava','Styl'];
+const TPL_CATS=['Základ','Banner','Profilovka','Star Trek','YouTube','Zábava','Styl'];
+const tplVisible=t=>t.any||((t.only||'video')===fmtCat());
 function paneTpl(){
-  const th=S.W>S.H?90:284;
-  return `<p class="hint">Šablona vymění pozadí a všechny vrstvy. Nahrané obrázky zůstanou v projektu, vrátit to jde tlačítkem Zpět.</p>`
-  +TPL_CATS.map(c=>{const list=TEMPLATES.filter(t=>t.cat===c);
-    return list.length?sec(c,`<div class="tpls">${list.map(t=>`<button type="button" class="tpl" data-tpl="${t.id}"><canvas width="160" height="${th}"></canvas><span>${esc(t.name)}</span></button>`).join('')}</div>`):'';}).join('');
+  const th=Math.round(160*S.H/S.W),rd=S.fmt==='avatar'?' style="border-radius:50%"':'';
+  return `<p class="hint">${S.fmt==='banner'?'Šablony banneru drží název v bezpečné zóně 1546 × 423 px. Zapni si pod plátnem „Zóny banneru“.':S.fmt==='avatar'?'Profilovky mají motiv uprostřed, ať se vejde do kruhu. Náhledy jsou kulaté, jak je uvidíš na YouTube.':'Šablona vymění pozadí a všechny vrstvy.'} Nahrané obrázky zůstanou v projektu, vrátit to jde tlačítkem Zpět.</p>`
+  +TPL_CATS.map(c=>{const list=TEMPLATES.filter(t=>t.cat===c&&tplVisible(t));
+    return list.length?sec(c,`<div class="tpls">${list.map(t=>`<button type="button" class="tpl" data-tpl="${t.id}"><canvas width="160" height="${th}"${rd}></canvas><span>${esc(t.name)}</span></button>`).join('')}</div>`):'';}).join('');
 }
 function centerObj(o){o.x=Math.round((S.W-o.w)/2);o.y=Math.round((S.H-o.h)/2);return o;}
 function addText(preset){
@@ -985,9 +1019,9 @@ const glowOf=(c,b=44)=>({on:true,color:c,a:1,blur:b,x:0,y:0});
 const bgSolid=c=>mkBg({type:'solid',c1:c});
 
 const NEW_TEMPLATES=[
-{id:'blank-dark',cat:'Základ',name:'Prázdná tmavá',build(){return {bg:bgSolid('#12131c'),objs:[]};}},
-{id:'blank-light',cat:'Základ',name:'Prázdná světlá',build(){return {bg:bgSolid('#f4f3f8'),objs:[]};}},
-{id:'blank-grad',cat:'Základ',name:'Prázdný přechod',build(){return {bg:mkBg({}),objs:[]};}},
+{id:'blank-dark',any:true,cat:'Základ',name:'Prázdná tmavá',build(){return {bg:bgSolid('#12131c'),objs:[]};}},
+{id:'blank-light',any:true,cat:'Základ',name:'Prázdná světlá',build(){return {bg:bgSolid('#f4f3f8'),objs:[]};}},
+{id:'blank-grad',any:true,cat:'Základ',name:'Prázdný přechod',build(){return {bg:mkBg({}),objs:[]};}},
 {id:'minimal',cat:'Základ',name:'Minimal tmavá',build(W,H){
   const {wide,m,X,Y}=P(W,H);
   const dot=shp('ellipse',{w:Math.round(m*.07),h:Math.round(m*.07),fill:'#ffa24a',x:X(.07),y:Y(wide?.28:.2),name:'Tečka'});
@@ -1167,6 +1201,371 @@ function addElem(i){
   selId=objs[objs.length-1].id;tab='props';commit();renderPane();req();
 }
 
+/* ---------- banner kanálu 2560 x 1440 (viditelný pruh 423 px uprostřed, bezpečná zóna 1546 x 423) ---------- */
+const bnd=(W,H)=>({T:(H-BAN.stripH)/2,B:(H+BAN.stripH)/2,X:f=>Math.round(W*f),Y:f=>Math.round(H*f)});
+const BANNER_TEMPLATES=[
+{id:'bn-space',cat:'Banner',only:'banner',name:'Hvězdný kanál',build(W,H){
+  const r=rnd(7),stars=[];
+  for(let i=0;i<150;i++){const z=Math.max(3,Math.round(2+r()*7));
+    stars.push(shp('ellipse',{w:z,h:z,x:Math.round(r()*W),y:Math.round(r()*H),fill:'#ffffff',opacity:Math.round((.3+r()*.7)*100)/100,name:'Hvězda'}));}
+  const orb=ctr(shp('ellipse',{w:1000,h:1000,fillOn:false,stroke:{w:4,color:'#9bd0ff'},opacity:.45,name:'Dráha'}),W*.04,H*.5);
+  const pl=ctr(shp('ellipse',{w:800,h:800,grad:true,fill:'#5ab0ff',fill2:'#06123f',angle:135,shadow:glowOf('#3a8dff',80),name:'Planeta'}),W*.04,H*.5);
+  const moon=ctr(shp('ellipse',{w:420,h:420,grad:true,fill:'#ffb86b',fill2:'#7a2a00',angle:140,shadow:glowOf('#ff8a3a',50),name:'Měsíc'}),W*.95,H*.4);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Bebas Neue',size:200,color:'#ffffff',ls:12,w:1480,shadow:glowOf('#4aa3ff',50),name:'Název kanálu'},W/2,H/2-40);
+  const s=ctxt({text:'KAPITÁNŮV DENÍK · NOVÉ DÍLY',font:'Montserrat',weight:700,size:46,color:'#9bd0ff',ls:12,w:1480,name:'Podtitul'},W/2,H/2+112);
+  const hand=ctxt({text:'🖖',font:'Montserrat',size:190,w:260,shadow:SOFT,name:'Pozdrav'},W*.89,H*.62);
+  return {bg:mkBg({c1:'#02030a',c2:'#0b1d4a',angle:200,vig:25}),objs:[...stars,orb,pl,moon,t,s,hand]};
+}},
+{id:'bn-lcars',cat:'Banner',only:'banner',name:'LCARS banner',build(W,H){
+  const b=bnd(W,H),h=40;
+  const defs=[[0,.08,'#ff9c00'],[.09,.2,'#cc99ff'],[.30,.07,'#9999ff'],[.38,.22,'#ff9966'],[.61,.12,'#cc6666'],[.74,.1,'#9999ff'],[.85,.15,'#ff9c00']];
+  const row=y=>defs.map(d=>shp('round',{x:b.X(d[0]),y:Math.round(y),w:b.X(d[1]),h,radius:20,fill:d[2],name:'LCARS pruh'}));
+  const top=row(b.T+6),bot=row(b.B-6-h);
+  const l=shp('round',{x:b.X(.012),y:b.Y(.12),w:70,h:b.Y(.76),radius:35,fill:'#cc99ff',name:'Levý sloupec'});
+  const rr2=shp('round',{x:W-b.X(.012)-70,y:b.Y(.12),w:70,h:b.Y(.76),radius:35,fill:'#ff9c00',name:'Pravý sloupec'});
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Barlow Condensed',weight:700,size:190,color:'#ff9c00',ls:10,w:1480,name:'Název kanálu'},W/2,H/2-8);
+  const s=ctxt({text:'HVĚZDNÉ DATUM 79412.3 · NOVÉ DÍLY KAŽDÝ TÝDEN',font:'JetBrains Mono',weight:600,size:36,color:'#cc99ff',ls:3,w:1480,name:'Podtitul'},W/2,H/2+148);
+  return {bg:bgSolid('#000000'),objs:[l,rr2,...top,...bot,t,s]};
+}},
+{id:'bn-neon',cat:'Banner',only:'banner',name:'Neon',build(W,H){
+  const a=ctr(shp('ellipse',{w:700,h:700,fillOn:false,stroke:{w:14,color:'#00e5ff'},shadow:glowOf('#00e5ff',40),name:'Prstenec vlevo'}),W*.07,H*.5);
+  const b2=ctr(shp('ellipse',{w:700,h:700,fillOn:false,stroke:{w:14,color:'#ff2bd6'},shadow:glowOf('#ff2bd6',40),name:'Prstenec vpravo'}),W*.93,H*.5);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Bebas Neue',size:210,color:'#ffffff',ls:14,w:1480,shadow:glowOf('#ff2bd6',50),name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'NOVÉ VIDEO KAŽDÝ TÝDEN',font:'Montserrat',weight:800,size:46,color:'#00e5ff',ls:14,w:1480,shadow:glowOf('#00e5ff',26),name:'Podtitul'},W/2,H/2+120);
+  return {bg:mkBg({c1:'#05010f',c2:'#2b0a5e',angle:160,vig:45}),objs:[a,b2,t,s]};
+}},
+{id:'bn-gaming',cat:'Banner',only:'banner',name:'Gaming',build(W,H){
+  const burst=ctr(shp('burst',{w:1500,h:1500,grad:true,fill:'#39ff14',fill2:'#00c2ff',opacity:.3,blend:'screen',rot:8,name:'Záře'}),W/2,H/2);
+  const pad=ctxt({text:'🎮',font:'Montserrat',size:380,w:520,shadow:SOFT,name:'Ovladač'},W*.09,H*.5);
+  const joy=ctxt({text:'🕹️',font:'Montserrat',size:380,w:520,shadow:SOFT,name:'Joystick'},W*.91,H*.5);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Anton',size:190,color:'#39ff14',w:1480,stroke:{w:12,color:'#000000'},shadow:HARD,name:'Název kanálu'},W/2,H/2-40);
+  const s=ctxt({text:"GAMEPLAY · LET'S PLAY · NOVÉ DÍLY",font:'Barlow Condensed',weight:700,size:54,color:'#ffffff',ls:5,w:1100,box:{on:true,color:'#000000',pad:14,radius:10},name:'Podtitul'},W/2,H/2+135);
+  return {bg:mkBg({c1:'#070a14',c2:'#2a0b4d',angle:150,vig:50}),objs:[burst,pad,joy,t,s]};
+}},
+{id:'bn-minimal',cat:'Banner',only:'banner',name:'Minimal tmavý',build(W,H){
+  const acc=ctr(shp('pill',{w:180,h:14,grad:true,fill:'#ffa24a',fill2:'#b7a4ff',angle:90,name:'Proužek'}),W/2,H/2-112);
+  const t=ctxt({text:'Název kanálu',font:'Montserrat',weight:800,size:150,color:'#ffffff',w:1480,name:'Název kanálu'},W/2,H/2-10);
+  const s=ctxt({text:'Krátký popis toho, o čem kanál je',font:'Barlow',weight:600,size:48,color:'#9a9bb8',w:1480,name:'Podtitul'},W/2,H/2+108);
+  const d1=ctr(shp('ellipse',{w:44,h:44,fill:'#ffa24a',name:'Tečka vlevo'}),W*.1,H*.5);
+  const d2=ctr(shp('ellipse',{w:44,h:44,fill:'#b7a4ff',name:'Tečka vpravo'}),W*.9,H*.5);
+  return {bg:bgSolid('#0e0e12'),objs:[d1,d2,acc,t,s]};
+}},
+{id:'bn-synth',cat:'Banner',only:'banner',name:'Synthwave',build(W,H){
+  const sun=ctr(shp('ellipse',{w:800,h:800,grad:true,fill:'#ffe14a',fill2:'#ff2e97',angle:180,shadow:glowOf('#ff2e97',80),name:'Slunce'}),W/2,H*.5);
+  const fy=Math.round(H*.72),floor=shp('rect',{x:0,y:fy,w:W,h:H-fy,fill:'#12002b',name:'Podlaha'});
+  const lines=[0,1,2,3,4,5].map(i=>shp('rect',{x:0,y:Math.round(fy+Math.pow(i/5,1.7)*(H-fy-16))+4,w:W,h:3+i,fill:'#ff2e97',opacity:.85,name:'Čára mřížky'}));
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Bebas Neue',size:210,color:'#ffffff',ls:14,w:1480,shadow:{on:true,color:'#2a0050',a:1,blur:36,x:0,y:0},name:'Název kanálu'},W/2,H/2-40);
+  const s=ctxt({text:'RETRO MIX · NOVÉ DÍLY',font:'Montserrat',weight:700,size:44,color:'#ffe14a',ls:16,w:1480,shadow:{on:true,color:'#2a0050',a:1,blur:24,x:0,y:0},name:'Podtitul'},W/2,H/2+118);
+  return {bg:mkBg({c1:'#1a0033',c2:'#ff2e97',angle:180,vig:25}),objs:[sun,floor,...lines,t,s]};
+}},
+{id:'bn-nature',cat:'Banner',only:'banner',name:'Příroda',build(W,H){
+  const b=bnd(W,H),gy=Math.round(b.B+6),r=rnd(11),objs=[];
+  objs.push(ctr(shp('ellipse',{w:300,h:300,fill:'#ffe680',shadow:glowOf('#fff2a0',80),name:'Slunce'}),W*.87,H*.4));
+  [[.2,.4,420],[.6,.37,520],[.73,.44,380],[.36,.34,360]].forEach(c=>{
+    objs.push(ctr(shp('ellipse',{w:c[2],h:Math.round(c[2]*.32),fill:'#ffffff',opacity:.85,name:'Mrak'}),W*c[0],H*c[1]));
+    objs.push(ctr(shp('ellipse',{w:Math.round(c[2]*.6),h:Math.round(c[2]*.3),fill:'#ffffff',opacity:.85,name:'Mrak'}),W*c[0]+c[2]*.22,H*c[1]-c[2]*.08));});
+  const cols=['#0f3d2a','#14532d','#1b6b3a','#0b2e20'];
+  [[-20,380],[2170,2580]].forEach(rg=>{
+    for(let x=rg[0];x<rg[1];x+=70){const w=Math.round(90+r()*90),h=Math.round(w*(2.2+r()*.6));
+      objs.push(shp('tri',{w,h,x:Math.round(x),y:gy-h+14,fill:cols[Math.floor(r()*4)],name:'Strom'}));}});
+  objs.push(shp('rect',{x:0,y:gy,w:W,h:H-gy,fill:'#2f7a4b',name:'Louka'}));
+  objs.push(shp('rect',{x:0,y:Math.round(gy+(H-gy)*.55),w:W,h:H-Math.round(gy+(H-gy)*.55),fill:'#1f5c37',name:'Zem'}));
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Montserrat',weight:900,size:150,color:'#0f3d2a',w:1480,shadow:{on:true,color:'#ffffff',a:.7,blur:20,x:0,y:0},name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'PŘÍRODA · POHODA · NOVÉ DÍLY',font:'Montserrat',weight:700,size:44,color:'#14532d',ls:10,w:1480,name:'Podtitul'},W/2,H/2+100);
+  return {bg:mkBg({c1:'#8fd0ff',c2:'#eaf7ff',angle:180}),objs:[...objs,t,s]};
+}}
+];
+
+/* ---------- další šablony banneru ---------- */
+function ensureBricks(){
+  const id='tpl-bricks';
+  if(assets[id]&&imgCache.get(id))return id;
+  const c=document.createElement('canvas');c.width=2560;c.height=1440;const g=c.getContext('2d'),r=rnd(5);
+  g.fillStyle='#3a2a24';g.fillRect(0,0,2560,1440);
+  const bw=150,bh=62,gap=8;
+  for(let row=0,y=0;y<1440;row++,y+=bh+gap){
+    const off=row%2?-(bw+gap)/2:0;
+    for(let x=off;x<2560;x+=bw+gap){
+      g.fillStyle=`hsl(${10+r()*8} ${45+r()*15}% ${38+r()*14}%)`;g.fillRect(x,y,bw,bh);
+      g.fillStyle='rgba(0,0,0,.13)';g.fillRect(x,y+bh-8,bw,8);
+    }
+  }
+  assets[id]={url:c.toDataURL('image/jpeg',.85),w:2560,h:1440,name:'Cihlová zeď'};
+  imgCache.set(id,c);return id;
+}
+function ledString(W,y0,sag,n,colors,tag){
+  const o=[],pts=[];
+  for(let i=0;i<n;i++){const t=i/(n-1);pts.push([-40+(W+80)*t,y0+sag*(1-Math.pow(2*t-1,2))]);}
+  for(let i=0;i<n-1;i++){
+    const a=pts[i],b=pts[i+1],dx=b[0]-a[0],dy=b[1]-a[1],len=Math.hypot(dx,dy);
+    o.push(ctr(shp('rect',{w:Math.round(len+2),h:4,rot:Math.round(Math.atan2(dy,dx)*1800/Math.PI)/10,fill:'#2a2f45',name:'Drát '+tag}),(a[0]+b[0])/2,(a[1]+b[1])/2));
+  }
+  pts.forEach((p,i)=>{
+    const c=colors[i%colors.length];
+    o.push(ctr(shp('rect',{w:14,h:12,fill:'#2a2f45',name:'Patice'}),p[0],p[1]+6));
+    o.push(ctr(shp('ellipse',{w:34,h:48,fill:c,shadow:glowOf(c,36),name:'Žárovka '+tag}),p[0],p[1]+32));
+  });
+  return o;
+}
+const GOLD='#f3d98b';
+BANNER_TEMPLATES.push(
+{id:'bn-duo',cat:'Banner',only:'banner',name:'Dvojice',build(W,H){
+  const l=ctr(shp('ellipse',{w:260,h:260,fillOn:false,stroke:{w:12,color:'#ffa24a'},shadow:SOFT,name:'Rámeček vlevo'}),W/2-640,H/2);
+  const r=ctr(shp('ellipse',{w:260,h:260,fillOn:false,stroke:{w:12,color:'#b7a4ff'},shadow:SOFT,name:'Rámeček vpravo'}),W/2+640,H/2);
+  const t=ctxt({text:'JMÉNO & JMÉNO',font:'Montserrat',weight:900,size:96,color:'#ffffff',w:980,shadow:SOFT,name:'Názvy'},W/2,H/2-30);
+  const s=ctxt({text:'společný kanál',font:'Barlow',weight:600,size:44,color:'#c9c7e6',ls:6,w:980,name:'Podtitul'},W/2,H/2+70);
+  return {bg:mkBg({c1:'#141a3a',c2:'#3b1f6b',angle:140,vig:30}),objs:[l,r,t,s]};
+}},
+{id:'bn-lcars2',cat:'Banner',only:'banner',name:'LCARS závorky',build(W,H){
+  const b=bnd(W,H),T=Math.round(b.T),bk=(x0,dir,c1,c2)=>{
+    const vx=dir>0?x0:x0-100,hx=dir>0?x0:x0-500;
+    return [shp('round',{x:vx,y:T,w:100,h:BAN.stripH,radius:50,fill:c1,name:'Svislý pruh'}),
+      shp('round',{x:hx,y:T,w:500,h:56,radius:28,fill:c1,name:'Horní pruh'}),
+      shp('round',{x:hx,y:T+BAN.stripH-56,w:500,h:56,radius:28,fill:c1,name:'Dolní pruh'}),
+      shp('round',{x:dir>0?x0+140:x0-340,y:T+100,w:200,h:40,radius:20,fill:c2,name:'Pilulka'}),
+      shp('round',{x:dir>0?x0+140:x0-340,y:T+283-40,w:200,h:40,radius:20,fill:c2,name:'Pilulka'})];};
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Barlow Condensed',weight:700,size:180,color:'#ff9c00',ls:10,w:1000,name:'Název kanálu'},W/2,H/2-20);
+  const s=ctxt({text:'NOVÉ DÍLY KAŽDÝ TÝDEN',font:'JetBrains Mono',weight:600,size:34,color:'#cc99ff',ls:4,w:1000,name:'Podtitul'},W/2,H/2+110);
+  return {bg:bgSolid('#000000'),objs:[...bk(0,1,'#ff9c00','#cc99ff'),...bk(W,-1,'#cc99ff','#ff9c00'),t,s]};
+}},
+{id:'bn-cyber',cat:'Banner',only:'banner',name:'Cyber glitch',build(W,H){
+  const bars=[[.1,.4,600,18,'#fcee09'],[.12,.47,480,8,'#00f0ff'],[.9,.4,600,18,'#fcee09'],[.88,.47,480,8,'#00f0ff']].map(d=>ctr(shp('rect',{w:d[2],h:d[3],rot:d[0]<.5?-12:12,fill:d[4],name:'Pruh'}),W*d[0],H*d[1]));
+  const base={text:'NÁZEV KANÁLU',font:'Anton',size:190,ls:6,w:1480};
+  const m=ctxt(Object.assign({},base,{color:'#ff2bd6',opacity:.9,name:'Glitch růžový'}),W/2-9,H/2-20);
+  const c=ctxt(Object.assign({},base,{color:'#00f0ff',opacity:.9,name:'Glitch modrý'}),W/2+9,H/2-20);
+  const t=ctxt(Object.assign({},base,{color:'#ffffff',name:'Název kanálu'}),W/2,H/2-20);
+  const s=ctxt({text:'// NOVÉ DÍLY KAŽDÝ TÝDEN',font:'JetBrains Mono',weight:600,size:40,color:'#fcee09',ls:4,w:1480,name:'Podtitul'},W/2,H/2+120);
+  return {bg:bgSolid('#0a0a12'),objs:[...bars,m,c,t,s]};
+}},
+{id:'bn-sunset',cat:'Banner',only:'banner',name:'Západ slunce',build(W,H){
+  const sun=ctr(shp('ellipse',{w:420,h:420,grad:true,fill:'#ffd36b',fill2:'#ff6a3d',angle:180,shadow:glowOf('#ff9a3c',80),name:'Slunce'}),W*.8,H*.5);
+  const r=rnd(21),ms=[];
+  [[-120,380],[2160,2680]].forEach(rg=>{for(let x=rg[0];x<rg[1];x+=150){const w=Math.round(420+r()*260),h=Math.round(260+r()*220);
+    ms.push(shp('tri',{w,h,x:Math.round(x),y:Math.round(H/2+BAN.stripH/2+40-h),fill:r()>.5?'#2a0f3f':'#3d1a58',name:'Hora'}));}});
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Montserrat',weight:900,size:140,color:'#ffffff',w:1480,shadow:{on:true,color:'#3b1a5e',a:.8,blur:30,x:0,y:8},name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'PŘÍBĚHY · CESTY · NOVÉ DÍLY',font:'Montserrat',weight:700,size:42,color:'#ffe9c4',ls:12,w:1480,name:'Podtitul'},W/2,H/2+100);
+  return {bg:mkBg({c1:'#3b1a5e',c2:'#ff9a3c',angle:180}),objs:[sun,...ms,t,s]};
+}},
+{id:'bn-ocean',cat:'Banner',only:'banner',name:'Oceán',build(W,H){
+  const r=rnd(33),o=[];
+  [[.2,.78,1500],[.7,.82,1700],[.45,.72,1200]].forEach(w=>o.push(ctr(shp('ellipse',{w:w[2],h:Math.round(w[2]*.14),fill:'#ffffff',opacity:.22,name:'Vlna'}),W*w[0],H*w[1])));
+  for(let i=0;i<16;i++){const z=Math.round(30+r()*70),left=i%2===0;
+    o.push(ctr(shp('ellipse',{w:z,h:z,fillOn:false,stroke:{w:4,color:'#ffffff'},opacity:.55,name:'Bublina'}),left?W*(.03+r()*.16):W*(.81+r()*.16),H*(.3+r()*.45)));}
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Montserrat',weight:800,size:150,color:'#ffffff',w:1480,shadow:{on:true,color:'#023e8a',a:.7,blur:26,x:0,y:8},name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'PONOŘ SE DO NOVÝCH DÍLŮ',font:'Montserrat',weight:700,size:44,color:'#caf0f8',ls:12,w:1480,name:'Podtitul'},W/2,H/2+100);
+  return {bg:mkBg({c1:'#48cae4',c2:'#023e8a',angle:180,vig:15}),objs:[...o,t,s]};
+}},
+{id:'bn-tech',cat:'Banner',only:'banner',name:'Kód a technika',build(W,H){
+  const g=[];
+  for(let x=0;x<=W;x+=160)g.push(shp('rect',{x,y:0,w:2,h:H,fill:'#1b3a5a',opacity:.55,name:'Mřížka svislá'}));
+  for(let y=0;y<=H;y+=160)g.push(shp('rect',{x:0,y,w:W,h:2,fill:'#1b3a5a',opacity:.55,name:'Mřížka vodorovná'}));
+  const h1=ctr(shp('hex',{w:280,h:244,fillOn:false,stroke:{w:8,color:'#00e5ff'},shadow:glowOf('#00e5ff',30),name:'Šestiúhelník vlevo'}),W*.09,H*.5);
+  const h2=ctr(shp('hex',{w:280,h:244,fillOn:false,stroke:{w:8,color:'#39ff14'},shadow:glowOf('#39ff14',30),name:'Šestiúhelník vpravo'}),W*.91,H*.5);
+  const t=ctxt({text:'> NÁZEV_KANÁLU',font:'JetBrains Mono',weight:600,size:116,color:'#39ff14',w:1480,shadow:glowOf('#39ff14',30),name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'// kódování · technika · návody',font:'JetBrains Mono',weight:400,size:40,color:'#7dd3fc',w:1480,name:'Podtitul'},W/2,H/2+100);
+  return {bg:bgSolid('#07121f'),objs:[...g,h1,h2,t,s]};
+}},
+{id:'bn-sport',cat:'Banner',only:'banner',name:'Sport',build(W,H){
+  const st=[[.1,.4,700,56],[.07,.53,620,34],[.9,.4,700,56],[.93,.53,620,34]].map(d=>ctr(shp('rect',{w:d[2],h:d[3],rot:d[0]<.5?-18:18,fill:'#ffe600',name:'Pruh'}),W*d[0],H*d[1]));
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Anton',italic:true,size:190,color:'#ffffff',w:1480,shadow:HARD,name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'TRÉNINK · VÝZVY · MOTIVACE',font:'Barlow Condensed',weight:700,size:54,color:'#111111',ls:6,w:1000,box:{on:true,color:'#ffe600',pad:14,radius:6},name:'Podtitul'},W/2,H/2+120);
+  return {bg:bgSolid('#0b0b0b'),objs:[...st,t,s]};
+}},
+{id:'bn-light',cat:'Banner',only:'banner',name:'Světlý',build(W,H){
+  const c1=ctr(shp('ellipse',{w:420,h:420,fill:'#ffa24a',name:'Kruh oranžový'}),W*.06,H*.55);
+  const c2=ctr(shp('ellipse',{w:520,h:520,fill:'#b7a4ff',name:'Kruh fialový'}),W*.95,H*.45);
+  const c3=ctr(shp('ellipse',{w:150,h:150,fill:'#7db4ff',name:'Kruh modrý'}),W*.17,H*.4);
+  const acc=ctr(shp('pill',{w:180,h:14,grad:true,fill:'#ffa24a',fill2:'#b7a4ff',angle:90,name:'Proužek'}),W/2,H/2-112);
+  const t=ctxt({text:'Název kanálu',font:'Montserrat',weight:800,size:150,color:'#1b1b2a',w:1480,name:'Název kanálu'},W/2,H/2-10);
+  const s=ctxt({text:'Krátký popis toho, o čem kanál je',font:'Barlow',weight:600,size:48,color:'#5d5b72',w:1480,name:'Podtitul'},W/2,H/2+108);
+  return {bg:mkBg({c1:'#f6f4ff',c2:'#e3ecff',angle:160}),objs:[c1,c2,c3,acc,t,s]};
+}},
+{id:'bn-comic',cat:'Banner',only:'banner',name:'Komiks',build(W,H){
+  const bs=ctr(shp('burst',{w:1500,h:1500,fill:'#e11d2e',stroke:{w:12,color:'#111111'},rot:-6,name:'Výbuch'}),W/2,H/2);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Bangers',size:230,color:'#ffffff',rot:-3,w:1480,stroke:{w:16,color:'#111111'},shadow:HARD,name:'Název kanálu'},W/2,H/2-30);
+  const s=ctxt({text:'NOVÉ DÍLY!',font:'Bangers',size:66,color:'#ffd23f',ls:4,w:600,box:{on:true,color:'#111111',pad:12,radius:12},name:'Podtitul'},W/2,H/2+130);
+  return {bg:bgSolid('#ffd23f'),objs:[bs,t,s]};
+}},
+{id:'bn-elegant',cat:'Banner',only:'banner',name:'Elegantní zlatý',build(W,H){
+  const ln=(y,n)=>ctr(shp('pill',{w:520,h:4,grad:true,fill:'#b8892e',fill2:GOLD,angle:90,name:n}),W/2,y);
+  const dm=(x,n)=>ctr(shp('diamond',{w:26,h:26,fill:GOLD,name:n}),x,H/2);
+  const t=ctxt({text:'Název kanálu',font:'Playfair Display',weight:900,size:140,color:GOLD,w:1480,shadow:SOFT,name:'Název kanálu'},W/2,H/2-8);
+  const s=ctxt({text:'NOVÉ DÍLY · KAŽDÝ TÝDEN',font:'Barlow Condensed',weight:600,size:44,color:'#b8a46a',ls:14,w:1480,name:'Podtitul'},W/2,H/2+112);
+  return {bg:mkBg({c1:'#0b0b0f',c2:'#1f1a10',angle:160,vig:40}),objs:[ln(H/2-130,'Linka nahoře'),ln(H/2+168,'Linka dole'),dm(W/2-340,'Kosočtverec vlevo'),dm(W/2+340,'Kosočtverec vpravo'),t,s]};
+}},
+{id:'bn-zed',cat:'Banner',only:'banner',name:'Cihlová zeď',build(W,H){
+  const id=ensureBricks();
+  const plate=ctr(shp('round',{w:1520,h:300,radius:30,fill:'#111111',opacity:.8,stroke:{w:6,color:'#ffd23f'},shadow:SOFT,name:'Cedule'}),W/2,H/2);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Anton',size:150,color:'#ffffff',ls:6,w:1440,name:'Název kanálu'},W/2,H/2-45);
+  const s=ctxt({text:'ŘEMESLO · TECHNIKA · NOVÉ DÍLY',font:'Barlow Condensed',weight:700,size:46,color:'#ffd23f',ls:10,w:1440,name:'Podtitul'},W/2,H/2+80);
+  return {bg:mkBg({type:'image',asset:id,fit:'cover',vig:45,f:Object.assign(defFilters(),{brightness:85})}),objs:[plate,t,s]};
+}},
+{id:'bn-led',cat:'Banner',only:'banner',name:'LED světýlka',build(W,H){
+  const b=bnd(W,H),cols=['#ff3b5c','#ffd23f','#39ff14','#00e5ff','#b45cff'];
+  const s1=ledString(W,Math.round(b.T+8),40,26,cols,'1'),s2=ledString(W,Math.round(b.T+62),24,22,cols.slice().reverse(),'2');
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Bebas Neue',size:170,color:'#ffffff',ls:12,w:1480,shadow:glowOf('#ffd27a',46),name:'Název kanálu'},W/2,H/2+20);
+  const s=ctxt({text:'NOVÉ DÍLY KAŽDÝ TÝDEN',font:'Montserrat',weight:700,size:42,color:'#ffe9c4',ls:12,w:1480,name:'Podtitul'},W/2,H/2+140);
+  return {bg:mkBg({c1:'#070b1a',c2:'#101a3a',angle:180,vig:35}),objs:[...s1,...s2,t,s]};
+}}
+);
+
+/* ---------- trekovské bannery (styl panelů, bez log a insignií) ---------- */
+function lcarsBars(W,H,cols,shape,tag,labels){
+  const T=Math.round((H-BAN.stripH)/2),B=Math.round((H+BAN.stripH)/2),h=44,o=[];
+  const segs=[[0,.08],[.09,.2],[.30,.07],[.38,.22],[.61,.12],[.74,.1],[.85,.15]];
+  [T+6,B-6-h].forEach((y,row)=>segs.forEach((d,i)=>{
+    const x=Math.round(W*d[0]),w=Math.round(W*d[1]);
+    o.push(shp(shape,{x,y,w,h,radius:h/2,fill:cols[(i+row*2)%cols.length],name:tag+' pruh'}));
+    if(labels&&w>200)o.push(ctxt({text:labels[(i+row*3)%labels.length],font:'JetBrains Mono',weight:600,size:26,color:'#000000',w:w-40,name:'Číslo'},x+w/2,y+h/2));
+  }));
+  return o;
+}
+BANNER_TEMPLATES.push(
+{id:'bn-tng',cat:'Star Trek',only:'banner',name:'Panely TNG',build(W,H){
+  const cols=['#ff9900','#ffcc99','#cc99cc','#9999cc','#cc6666'],b=bnd(W,H);
+  const bars=lcarsBars(W,H,cols,'round','TNG',['47-1701','04-2364','81-0292','12-4471']);
+  const blk=(x,y,c,txt)=>[ctr(shp('round',{w:200,h:36,radius:18,fill:c,name:'Blok'}),x,y),ctxt({text:txt,font:'JetBrains Mono',weight:600,size:24,color:'#000000',w:160,name:'Číslo'},x,y)];
+  const side=[...blk(W*.08,H/2-60,'#cc99cc','03-7714'),...blk(W*.08,H/2,'#ff9900','55-1209'),...blk(W*.08,H/2+60,'#9999cc','21-6603'),
+              ...blk(W*.92,H/2-60,'#9999cc','90-4418'),...blk(W*.92,H/2,'#ff9900','14-0087'),...blk(W*.92,H/2+60,'#cc99cc','62-3305')];
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Barlow Condensed',weight:700,size:180,color:'#ff9900',ls:10,w:1480,name:'Název kanálu'},W/2,H/2-8);
+  const s=ctxt({text:'ZÁZNAM KAPITÁNA · NOVÉ DÍLY',font:'JetBrains Mono',weight:600,size:36,color:'#cc99cc',ls:3,w:1480,name:'Podtitul'},W/2,H/2+120);
+  return {bg:bgSolid('#000000'),objs:[...bars,...side,t,s]};
+}},
+{id:'bn-voy',cat:'Star Trek',only:'banner',name:'Panely Voyager',build(W,H){
+  const r=rnd(61),st=[];
+  for(let i=0;i<70;i++){const z=Math.round(3+r()*5);st.push(shp('ellipse',{w:z,h:z,x:Math.round(r()*W),y:Math.round(r()*H),fill:'#ffffff',opacity:Math.round((.3+r()*.6)*100)/100,name:'Hvězda'}));}
+  const orb1=ctr(shp('ellipse',{w:1500,h:420,fillOn:false,stroke:{w:3,color:'#99ccff'},opacity:.4,rot:-8,name:'Dráha'}),W/2,H/2);
+  const orb2=ctr(shp('ellipse',{w:1900,h:560,fillOn:false,stroke:{w:3,color:'#cc99ff'},opacity:.3,rot:6,name:'Dráha 2'}),W/2,H/2);
+  const bars=lcarsBars(W,H,['#99ccff','#cc99ff','#ffcc66','#6699cc','#cc6699'],'ribbon','Voyager',null);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Barlow Condensed',weight:700,size:190,color:'#ffffff',ls:12,w:1480,shadow:glowOf('#99ccff',44),name:'Název kanálu'},W/2,H/2-8);
+  const s=ctxt({text:'DENÍK Z DALEKÉ CESTY',font:'Montserrat',weight:700,size:40,color:'#99ccff',ls:14,w:1480,name:'Podtitul'},W/2,H/2+122);
+  return {bg:mkBg({c1:'#02040f',c2:'#0a1030',angle:180,vig:25}),objs:[...st,orb2,orb1,...bars,t,s]};
+}},
+{id:'bn-ds9',cat:'Star Trek',only:'banner',name:'Stanice DS9',build(W,H){
+  const ring=(cx,sz,tag)=>{
+    const o=[ctr(shp('ellipse',{w:sz,h:sz,fillOn:false,stroke:{w:16,color:'#ffb347'},shadow:glowOf('#ff9a3c',34),name:'Prstenec '+tag}),cx,H/2),
+             ctr(shp('ellipse',{w:Math.round(sz*.72),h:Math.round(sz*.72),fillOn:false,stroke:{w:6,color:'#cc9966'},name:'Vnitřní prstenec '+tag}),cx,H/2)];
+    [0,60,120].forEach(a=>o.push(ctr(shp('rect',{w:sz,h:12,rot:a,fill:'#996633',name:'Pylon '+tag}),cx,H/2)));
+    return o;};
+  const b=bnd(W,H);
+  const bar1=ctr(shp('ribbon',{w:1200,h:22,fill:'#cc9966',name:'Pruh nahoře'}),W/2,b.T+10);
+  const bar2=ctr(shp('ribbon',{w:1200,h:22,fill:'#996633',name:'Pruh dole'}),W/2,b.B-10);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Barlow Condensed',weight:700,size:180,color:'#ffb347',ls:8,w:1400,shadow:glowOf('#ff7a1a',30),name:'Název kanálu'},W/2,H/2-8);
+  const s=ctxt({text:'VÝCHOZÍ STANICE · NOVÉ DÍLY',font:'JetBrains Mono',weight:600,size:36,color:'#e0c9a6',ls:4,w:1400,name:'Podtitul'},W/2,H/2+122);
+  return {bg:mkBg({c1:'#0b0907',c2:'#2a1a10',angle:180,vig:40}),objs:[...ring(W*.07,800,'vlevo'),...ring(W*.93,800,'vpravo'),bar1,bar2,t,s]};
+}},
+{id:'bn-modern',cat:'Star Trek',only:'banner',name:'Moderní hologram',build(W,H){
+  const b=bnd(W,H);
+  const r1=ctr(shp('ellipse',{w:1100,h:1100,fillOn:false,stroke:{w:2,color:'#7dd3fc'},opacity:.25,name:'Kruh 1'}),W/2,H/2);
+  const r2=ctr(shp('ellipse',{w:1500,h:1500,fillOn:false,stroke:{w:2,color:'#7dd3fc'},opacity:.18,name:'Kruh 2'}),W/2,H/2);
+  const l1=ctr(shp('rect',{w:1600,h:3,fill:'#7dd3fc',opacity:.7,shadow:glowOf('#7dd3fc',20),name:'Linka nahoře'}),W/2,b.T+12);
+  const l2=ctr(shp('rect',{w:1600,h:3,fill:'#7dd3fc',opacity:.7,shadow:glowOf('#7dd3fc',20),name:'Linka dole'}),W/2,b.B-12);
+  const ticks=[];for(let i=-6;i<=6;i++)ticks.push(ctr(shp('rect',{w:3,h:i%3===0?26:14,fill:'#7dd3fc',opacity:.6,name:'Značka'}),W/2+i*120,b.T+31));
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Montserrat',weight:700,size:128,color:'#ffffff',ls:22,w:1480,shadow:glowOf('#38bdf8',36),name:'Název kanálu'},W/2,H/2-10);
+  const s=ctxt({text:'NOVÉ DÍLY KAŽDÝ TÝDEN',font:'Barlow Condensed',weight:600,size:44,color:'#7dd3fc',ls:18,w:1480,name:'Podtitul'},W/2,H/2+110);
+  return {bg:mkBg({c1:'#04080f',c2:'#0b1a2a',angle:160,vig:35}),objs:[r2,r1,l1,l2,...ticks,t,s]};
+}},
+{id:'bn-klingon',cat:'Star Trek',only:'banner',name:'Bojovník',build(W,H){
+  const b=bnd(W,H),z=[];
+  for(let x=0;x<W;x+=120){
+    z.push(shp('tri',{w:120,h:60,x,y:Math.round(b.T),flipV:true,fill:'#b30000',name:'Zub nahoře'}));
+    z.push(shp('tri',{w:120,h:60,x,y:Math.round(b.B-60),fill:'#b30000',name:'Zub dole'}));}
+  const l=ctr(shp('tri',{w:520,h:900,fill:'#4a0000',rot:-90,name:'Hrot vlevo'}),W*.03,H/2);
+  const r=ctr(shp('tri',{w:520,h:900,fill:'#4a0000',rot:90,name:'Hrot vpravo'}),W*.97,H/2);
+  const t=ctxt({text:'NÁZEV KANÁLU',font:'Anton',size:180,color:'#ff3b3b',ls:6,w:1480,stroke:{w:8,color:'#000000'},shadow:HARD,name:'Název kanálu'},W/2,H/2-5);
+  const s=ctxt({text:'ČEST · VÍTĚZSTVÍ · NOVÉ DÍLY',font:'Barlow Condensed',weight:700,size:50,color:'#e5e5e5',ls:12,w:1480,name:'Podtitul'},W/2,H/2+120);
+  return {bg:mkBg({c1:'#0a0000',c2:'#3a0000',angle:180,vig:55}),objs:[l,r,...z,t,s]};
+}}
+);
+
+/* ---------- profilovky kanálu 800 x 800 (motiv uprostřed, YouTube ukáže kruh) ---------- */
+const mono=(txt,o)=>ctxt(Object.assign({text:txt,w:700,name:'Monogram'},o),400,400);
+const AVATARS=[
+{id:'av-space',cat:'Star Trek',name:'Hvězdná',build(){
+  const r=rnd(9),st=[];
+  for(let i=0;i<45;i++){const z=Math.round(2+r()*4);st.push(shp('ellipse',{w:z,h:z,x:Math.round(r()*800),y:Math.round(r()*800),fill:'#ffffff',opacity:Math.round((.3+r()*.7)*100)/100,name:'Hvězda'}));}
+  const pl=ctr(shp('ellipse',{w:520,h:520,grad:true,fill:'#5ab0ff',fill2:'#06123f',angle:135,shadow:glowOf('#3a8dff',60),name:'Planeta'}),400,400);
+  const orb=ctr(shp('ellipse',{w:700,h:240,fillOn:false,stroke:{w:4,color:'#9bd0ff'},opacity:.6,rot:-20,name:'Dráha'}),400,400);
+  return {bg:mkBg({c1:'#02030a',c2:'#0b1d4a',angle:200,vig:25}),objs:[...st,pl,orb,mono('K',{font:'Bebas Neue',size:340,color:'#ffffff',shadow:glowOf('#4aa3ff',40)})]};
+}},
+{id:'av-lcars',cat:'Star Trek',name:'LCARS',build(){
+  const p=(y,w,c,x)=>ctr(shp('round',{w,h:64,radius:32,fill:c,name:'LCARS pruh'}),x||400,y);
+  return {bg:bgSolid('#000000'),objs:[p(170,480,'#ff9c00'),p(250,300,'#cc99ff',330),p(630,480,'#cc99ff'),p(550,300,'#ff9966',470),mono('K',{font:'Barlow Condensed',weight:700,size:330,color:'#ff9c00'})]};
+}},
+{id:'av-ds9',cat:'Star Trek',name:'Stanice',build(){
+  const o=[ctr(shp('ellipse',{w:660,h:660,fillOn:false,stroke:{w:16,color:'#ffb347'},shadow:glowOf('#ff9a3c',30),name:'Prstenec'}),400,400),
+           ctr(shp('ellipse',{w:480,h:480,fillOn:false,stroke:{w:6,color:'#cc9966'},name:'Vnitřní prstenec'}),400,400)];
+  [0,60,120].forEach(a=>o.push(ctr(shp('rect',{w:660,h:12,rot:a,fill:'#996633',name:'Pylon'}),400,400)));
+  return {bg:mkBg({c1:'#0b0907',c2:'#2a1a10',angle:180,vig:30}),objs:[...o,mono('K',{font:'Barlow Condensed',weight:700,size:260,color:'#ffb347',shadow:{on:true,color:'#0b0907',a:1,blur:20,x:0,y:0}})]};
+}},
+{id:'av-voy',cat:'Star Trek',name:'Dráhy',build(){
+  const pl=ctr(shp('ellipse',{w:440,h:440,grad:true,fill:'#99ccff',fill2:'#3b1f6b',angle:140,shadow:glowOf('#99ccff',50),name:'Planeta'}),400,400);
+  const o1=ctr(shp('ellipse',{w:720,h:260,fillOn:false,stroke:{w:4,color:'#cc99ff'},rot:-18,name:'Dráha 1'}),400,400);
+  const o2=ctr(shp('ellipse',{w:720,h:260,fillOn:false,stroke:{w:3,color:'#99ccff'},opacity:.6,rot:14,name:'Dráha 2'}),400,400);
+  return {bg:mkBg({c1:'#02040f',c2:'#0a1030',angle:180,vig:25}),objs:[pl,o1,o2,mono('K',{font:'Barlow Condensed',weight:700,size:300,color:'#ffffff',shadow:{on:true,color:'#0a1030',a:1,blur:24,x:0,y:0}})]};
+}},
+{id:'av-hand',cat:'Star Trek',name:'Pozdrav',build(){
+  const ring=ctr(shp('ellipse',{w:620,h:620,fillOn:false,stroke:{w:14,color:'#ffc83d'},shadow:glowOf('#ffc83d',30),name:'Zlatý kruh'}),400,400);
+  return {bg:mkBg({c1:'#0b1d4a',c2:'#02030a',angle:160,vig:20}),objs:[ring,ctxt({text:'🖖',font:'Montserrat',size:380,w:520,name:'Pozdrav',shadow:SOFT},400,400)]};
+}},
+{id:'av-neon',cat:'Profilovka',name:'Neon',build(){
+  const a=ctr(shp('ellipse',{w:640,h:640,fillOn:false,stroke:{w:16,color:'#00e5ff'},shadow:glowOf('#00e5ff',40),name:'Prstenec modrý'}),400,400);
+  const b=ctr(shp('ellipse',{w:500,h:500,fillOn:false,stroke:{w:10,color:'#ff2bd6'},shadow:glowOf('#ff2bd6',40),name:'Prstenec růžový'}),400,400);
+  return {bg:mkBg({c1:'#05010f',c2:'#2b0a5e',angle:160,vig:40}),objs:[a,b,mono('K',{font:'Bebas Neue',size:300,color:'#ffffff',shadow:glowOf('#ff2bd6',40)})]};
+}},
+{id:'av-gaming',cat:'Profilovka',name:'Gaming',build(){
+  const bs=ctr(shp('burst',{w:780,h:780,grad:true,fill:'#39ff14',fill2:'#00c2ff',opacity:.4,blend:'screen',rot:8,name:'Záře'}),400,400);
+  return {bg:mkBg({c1:'#070a14',c2:'#2a0b4d',angle:150,vig:45}),objs:[bs,ctxt({text:'🎮',font:'Montserrat',size:360,w:520,name:'Ovladač',shadow:SOFT},400,400)]};
+}},
+{id:'av-minimal',cat:'Profilovka',name:'Minimal',build(){
+  const ring=ctr(shp('ellipse',{w:640,h:640,fillOn:false,stroke:{w:6,color:'#ffa24a'},name:'Kruh'}),400,400);
+  const dot=ctr(shp('ellipse',{w:36,h:36,fill:'#b7a4ff',name:'Tečka'}),400,640);
+  return {bg:bgSolid('#0e0e12'),objs:[ring,dot,mono('K',{font:'Montserrat',weight:800,size:300,color:'#ffffff'})]};
+}},
+{id:'av-duo',cat:'Profilovka',name:'Dvojice',build(){
+  const l=shp('rect',{x:0,y:0,w:400,h:800,fill:'#ffa24a',name:'Levá půlka'}),r=shp('rect',{x:400,y:0,w:400,h:800,fill:'#7c5cff',name:'Pravá půlka'});
+  return {bg:bgSolid('#0e0e12'),objs:[l,r,mono('&',{font:'Anton',size:430,color:'#ffffff',shadow:HARD})]};
+}},
+{id:'av-brick',cat:'Profilovka',name:'Cihlová zeď',build(){
+  const id=ensureBricks();
+  return {bg:mkBg({type:'image',asset:id,fit:'cover',vig:40,f:Object.assign(defFilters(),{brightness:85})}),objs:[mono('K',{font:'Anton',size:400,color:'#ffffff',stroke:{w:14,color:'#111111'},shadow:HARD})]};
+}},
+{id:'av-led',cat:'Profilovka',name:'LED světýlka',build(){
+  const cols=['#ff3b5c','#ffd23f','#39ff14','#00e5ff','#b45cff'];
+  return {bg:mkBg({c1:'#070b1a',c2:'#101a3a',angle:180,vig:30}),objs:[...ledString(800,150,60,9,cols,'1'),...ledString(800,560,60,9,cols.slice().reverse(),'2'),mono('K',{font:'Bebas Neue',size:330,color:'#ffffff',shadow:glowOf('#ffd27a',40)})]};
+}},
+{id:'av-sunset',cat:'Profilovka',name:'Západ slunce',build(){
+  const sun=ctr(shp('ellipse',{w:320,h:320,grad:true,fill:'#ffd36b',fill2:'#ff6a3d',angle:180,shadow:glowOf('#ff9a3c',50),name:'Slunce'}),400,380);
+  const m1=shp('tri',{w:620,h:320,x:-140,y:480,fill:'#2a0f3f',name:'Hora vlevo'}),m2=shp('tri',{w:700,h:380,x:300,y:420,fill:'#3d1a58',name:'Hora vpravo'});
+  return {bg:mkBg({c1:'#3b1a5e',c2:'#ff9a3c',angle:180}),objs:[sun,m1,m2,mono('K',{font:'Montserrat',weight:900,size:280,color:'#ffffff',shadow:{on:true,color:'#3b1a5e',a:.8,blur:24,x:0,y:8}})]};
+}},
+{id:'av-synth',cat:'Profilovka',name:'Synthwave',build(){
+  const sun=ctr(shp('ellipse',{w:520,h:520,grad:true,fill:'#ffe14a',fill2:'#ff2e97',angle:180,shadow:glowOf('#ff2e97',50),name:'Slunce'}),400,380);
+  const fl=shp('rect',{x:0,y:560,w:800,h:240,fill:'#12002b',name:'Podlaha'});
+  const ln=[0,1,2,3].map(i=>shp('rect',{x:0,y:Math.round(566+Math.pow(i/3,1.6)*200),w:800,h:3+i,fill:'#ff2e97',opacity:.85,name:'Čára mřížky'}));
+  return {bg:mkBg({c1:'#1a0033',c2:'#ff2e97',angle:180}),objs:[sun,fl,...ln,mono('K',{font:'Bebas Neue',size:320,color:'#ffffff',shadow:{on:true,color:'#2a0050',a:1,blur:30,x:0,y:0}})]};
+}},
+{id:'av-light',cat:'Profilovka',name:'Světlá',build(){
+  const c1=ctr(shp('ellipse',{w:380,h:380,fill:'#ffa24a',name:'Kruh oranžový'}),230,250),c2=ctr(shp('ellipse',{w:420,h:420,fill:'#b7a4ff',name:'Kruh fialový'}),590,560);
+  return {bg:mkBg({c1:'#f6f4ff',c2:'#e3ecff',angle:160}),objs:[c1,c2,mono('K',{font:'Montserrat',weight:900,size:320,color:'#1b1b2a'})]};
+}},
+{id:'av-elegant',cat:'Profilovka',name:'Elegantní zlatá',build(){
+  const a=ctr(shp('ellipse',{w:660,h:660,fillOn:false,stroke:{w:8,color:GOLD},name:'Zlatý kruh'}),400,400),b=ctr(shp('ellipse',{w:600,h:600,fillOn:false,stroke:{w:3,color:'#b8892e'},name:'Vnitřní kruh'}),400,400);
+  return {bg:mkBg({c1:'#0b0b0f',c2:'#1f1a10',angle:160,vig:35}),objs:[a,b,mono('K',{font:'Playfair Display',weight:900,size:340,color:GOLD})]};
+}},
+{id:'av-tech',cat:'Profilovka',name:'Kód',build(){
+  const g=[];for(let i=0;i<=800;i+=100){g.push(shp('rect',{x:i,y:0,w:2,h:800,fill:'#1b3a5a',opacity:.55,name:'Mřížka'}));g.push(shp('rect',{x:0,y:i,w:800,h:2,fill:'#1b3a5a',opacity:.55,name:'Mřížka'}));}
+  const hx=ctr(shp('hex',{w:580,h:500,fillOn:false,stroke:{w:8,color:'#39ff14'},shadow:glowOf('#39ff14',26),name:'Šestiúhelník'}),400,400);
+  return {bg:bgSolid('#07121f'),objs:[...g,hx,mono('>_',{font:'JetBrains Mono',weight:600,size:200,color:'#39ff14',shadow:glowOf('#39ff14',30)})]};
+}},
+{id:'av-sport',cat:'Profilovka',name:'Sport',build(){
+  const st=ctr(shp('rect',{w:1100,h:210,rot:-35,fill:'#ffe600',name:'Pruh'}),400,400);
+  return {bg:bgSolid('#0b0b0b'),objs:[st,mono('K',{font:'Anton',italic:true,size:400,color:'#ffffff',stroke:{w:14,color:'#111111'},shadow:HARD})]};
+}}
+];
+AVATARS.forEach(t=>{t.only='avatar';});
+NEW_TEMPLATES.push(...AVATARS);
+
 /* ---------- templates ---------- */
 const mkBg=o=>Object.assign(defBg(),o);
 const TEMPLATES=[
@@ -1211,7 +1610,8 @@ const TEMPLATES=[
     const sub=newText({text:'Pět pravidel, která fungují',font:'Barlow Condensed',weight:700,size:wide?52:46,color:'#5d5b72',upper:true,ls:3,align:'left',w:Math.round(W*.6),x:Math.round(W*.06),y:Math.round(H*(wide?.75:.44)),name:'Podnadpis'});
     return {bg:mkBg({type:'solid',c1:'#f3efe6'}),objs:[dot,title,line,sub]};
   }},
-  ...NEW_TEMPLATES
+  ...NEW_TEMPLATES,
+  ...BANNER_TEMPLATES
 ];
 function tplState(id,fmt){
   const {W,H}=FORMATS[fmt],t=TEMPLATES.find(x=>x.id===id),b=t.build(W,H);
@@ -1231,7 +1631,7 @@ function paintThumbs(){
 }
 function drawThumbs(){
   paintThumbs();
-  fontsFor(TEMPLATES.flatMap(t=>tplState(t.id,S.fmt).objs)).then(()=>{if(tab==='tpl'&&$('#pane .tpl'))paintThumbs();});
+  fontsFor($$('#pane .tpl').flatMap(el=>tplState(el.dataset.tpl,S.fmt).objs)).then(()=>{if(tab==='tpl'&&$('#pane .tpl'))paintThumbs();});
 }
 
 /* ---------- format switch ---------- */
@@ -1246,9 +1646,15 @@ $$('[data-fmt]').forEach(b=>b.addEventListener('click',()=>{
     if(o.shadow){o.shadow.blur=Math.round(o.shadow.blur*s);o.shadow.x=Math.round(o.shadow.x*s);o.shadow.y=Math.round(o.shadow.y*s);}
     o.x=Math.round(cx-o.w/2);o.y=Math.round(cy-o.h/2);
   }
-  S.fmt=f;S.W=n.W;S.H=n.H;view.zoom='fit';commit();layout();renderPane();
-  toast('Formát '+f+': rozložení je přepočítané, dolaď ho ručně');
+  S.fmt=f;S.W=n.W;S.H=n.H;view.zoom='fit';view.guides.banner=(f==='banner');view.guides.avatar=(f==='avatar');commit();layout();renderPane();
+  toast(f==='avatar'?'Profilovka: motiv drž uprostřed, YouTube ji ořízne do kruhu':f==='banner'?'Banner kanálu: text a logo drž v žluté bezpečné zóně':'Formát '+f+': rozložení je přepočítané, dolaď ho ručně');
 }));
+function syncChips(){
+  $$('[data-guide]').forEach(b=>{
+    const only=b.dataset.only;b.hidden=!!only&&only!==fmtCat();
+    b.setAttribute('aria-pressed',String(!!view.guides[b.dataset.guide]));
+  });
+}
 $$('[data-guide]').forEach(b=>b.addEventListener('click',()=>{
   const k=b.dataset.guide;view.guides[k]=!view.guides[k];b.setAttribute('aria-pressed',String(view.guides[k]));req();
 }));
@@ -1256,16 +1662,18 @@ $$('[data-guide]').forEach(b=>b.addEventListener('click',()=>{
 /* ---------- export ---------- */
 const exp={fmt:'jpg',scale:1,q:.92,name:'miniatura'};
 function paneExport(){
-  const sc=[1,1.5,2].map(k=>[k,`${k}× · ${Math.round(S.W*k)} × ${Math.round(S.H*k)} px`]);
+  const bn=S.fmt==='banner',av=S.fmt==='avatar',list=bn?[1,.8]:av?[1,.5]:[1,1.5,2];
+  if(!list.includes(exp.scale))exp.scale=1;
+  const sc=list.map(k=>[k,`${k}× · ${Math.round(S.W*k)} × ${Math.round(S.H*k)} px`]);
   return sec('Obrázek',`<div class="f"><span class="lab"><span>Formát souboru</span></span><div class="opt">${[['png','PNG'],['jpg','JPG'],['webp','WEBP']].map(x=>`<button type="button" data-exp="fmt" data-v="${x[0]}">${x[1]}</button>`).join('')}</div></div>
     <label class="f"><span class="lab"><span>Velikost</span></span><select data-exp="scale">${sc.map(x=>`<option value="${x[0]}">${x[1]}</option>`).join('')}</select></label>
     ${exp.fmt!=='png'?`<label class="f"><span class="lab"><span>Kvalita</span><output id="qout"></output></span><input type="range" data-exp="q" min="50" max="100" step="1"></label>`:''}
     <label class="f"><span class="lab"><span>Název souboru</span></span><input type="text" data-exp="name" maxlength="60"></label>
     <div class="note" id="sizenote">Počítám velikost…</div>
-    <button type="button" class="btn pri" data-exp="save" style="width:100%">Uložit obrázek</button>`)
+    <div class="g2"><button type="button" class="btn pri" data-exp="save">Uložit obrázek</button><button type="button" class="btn" data-exp="copy">Kopírovat</button></div>`)
   +sec('Projekt',`<p class="hint">Rozdělaná práce se ukládá sama v tomto prohlížeči. Pro zálohu nebo přenos na jiné zařízení ulož projekt do souboru.</p>
     <div class="row"><button type="button" class="btn sm" data-exp="savePrj">Uložit projekt (.json)</button><button type="button" class="btn sm" data-exp="loadPrj">Načíst projekt</button></div>`)
-  +sec('Tipy pro YouTube',`<p class="hint" style="margin:0">Doporučená miniatura je 1280 × 720 px (16:9) do 2 MB. Pro menší soubor zvol JPG a kvalitu kolem 90 %. Zapni v liště pod plátnem „Rozhraní YouTube“, ať text nezapadne pod čas videa.</p>`);
+  +sec(bn?'Tipy pro banner':av?'Tipy pro profilovku':'Tipy pro YouTube',av?`<p class="hint" style="margin:0">Profilovka se na YouTube zobrazuje v kruhu 98 × 98 px. Doporučuju nahrát 800 × 800 px, formát JPG nebo PNG (povoleno i GIF a BMP, nejvýš 15 MB). Rohy čtverce se oříznou, proto drž motiv uprostřed v žlutém kruhu. Zapni si pod plátnem „Kruhová maska“.</p>`:bn?`<p class="hint" style="margin:0">Banner kanálu má mít 2560 × 1440 px (minimum 2048 × 1152) a nejvýš 6 MB. Na počítači je vidět jen pruh 2560 × 423 px uprostřed, na tabletu 1855 × 423 a na mobilu 1546 × 423. Logo a text proto drž v žluté bezpečné zóně. Zapni si pod plátnem „Zóny banneru“.</p>`:`<p class="hint" style="margin:0">Doporučená miniatura je 1280 × 720 px (16:9) do 2 MB. Pro menší soubor zvol JPG a kvalitu kolem 90 %. Zapni v liště pod plátnem „Rozhraní YouTube“, ať text nezapadne pod čas videa.</p>`);
 }
 function syncExport(){
   $$('#pane [data-exp="fmt"]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.v===exp.fmt)));
@@ -1284,15 +1692,17 @@ function expClick(b){
   const k=b.dataset.exp;
   if(k==='fmt'){exp.fmt=b.dataset.v;renderPane();}
   else if(k==='save')saveImage();
+  else if(k==='copy')copyImage();
   else if(k==='savePrj')saveProject();
   else if(k==='loadPrj')$('#filePrj').click();
 }
-async function buildBlob(){
+async function buildBlob(fmt){
+  fmt=fmt||exp.fmt;
   await fontsFor(S.objs);
   const k=exp.scale,c=document.createElement('canvas');
   c.width=Math.round(S.W*k);c.height=Math.round(S.H*k);
   const g=c.getContext('2d');RS=k;g.scale(k,k);render(g,S.W,S.H);RS=1;
-  const mime={png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[exp.fmt];
+  const mime={png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[fmt];
   return new Promise(r=>c.toBlob(b=>r(b),mime,exp.q));
 }
 let sizeT=0,sizeTok=0;
@@ -1305,35 +1715,66 @@ function updateSize(){
     if(!blob){note.textContent='Velikost se nepodařilo spočítat.';return;}
     const kb=blob.size/1024,txt=kb>1024?(kb/1024).toFixed(2)+' MB':Math.round(kb)+' kB';
     const w=Math.round(S.W*exp.scale),h=Math.round(S.H*exp.scale);
-    if(blob.size>2*1024*1024){note.className='note warn';note.textContent=`${w} × ${h} px · ${txt}. Přes 2 MB, YouTube miniaturu odmítne. Zkus JPG, nižší kvalitu nebo menší velikost.`;}
+    const bn=S.fmt==='banner',av=S.fmt==='avatar',mb=bn?6:av?15:2,lim=mb*1024*1024;
+    if(blob.size>lim){note.className='note warn';note.textContent=`${w} × ${h} px · ${txt}. Přes ${mb} MB, YouTube ${bn?'banner':av?'profilovku':'miniaturu'} odmítne. Zkus JPG, nižší kvalitu${bn?'':' nebo menší velikost'}.`;}
     else note.textContent=`${w} × ${h} px · ${txt}`;
   },350);
 }
 let dlP=null;
-const getDL=()=>dlP||(dlP=(window.claude&&window.claude.use?window.claude.use('downloads'):Promise.resolve(null)).catch(()=>null));
+function getDL(){
+  if(!dlP){
+    const t=new Promise(r=>setTimeout(()=>r(null),4000));
+    const u=(window.claude&&window.claude.use)?Promise.resolve().then(()=>window.claude.use('downloads')).catch(()=>null):Promise.resolve(null);
+    dlP=Promise.race([u,t]).then(v=>{if(!v)dlP=null;return v;});
+  }
+  return dlP;
+}
 async function saveFile(fn,data){
   const dl=await getDL();
-  if(dl){
-    try{const r=await dl.save({filename:fn,data});toast(r.status==='saved'?'Uloženo: '+fn:'Odesláno');return;}
-    catch(err){if(err&&err.code==='declined'){toast('Ukládání zrušeno');return;}}
+  if(!dl){showFallback(fn,data,'Přímé ukládání tu není dostupné. Obrázek si ulož ručně, nebo ho zkopíruj.');return false;}
+  try{
+    const r=await dl.save({filename:fn,data});
+    toast(r&&r.status==='saved'?'Uloženo: '+fn:'Soubor odeslán');return true;
+  }catch(err){
+    const c=err&&err.code;
+    if(c==='declined'){toast('Ukládání zrušeno');return false;}
+    if(c==='rate_limited'){toast('Okno uložení už je otevřené, chvilku počkej');return false;}
+    if(c==='too_large'){toast('Soubor je moc velký, zvol menší velikost nebo JPG');return false;}
+    showFallback(fn,data,'Uložení se nepovedlo'+(c?' ('+c+')':'')+'. Zkus to znovu, nebo obrázek zkopíruj.');return false;
   }
-  showFallback(fn,data);
 }
-function showFallback(fn,data){
-  const m=$('#modal');let body='';
-  if(typeof data!=='string'){
-    const url=URL.createObjectURL(data);
-    body=`<p>Přímé uložení tu není k dispozici. Podrž prst na obrázku, nebo na něj klikni pravým tlačítkem, a vyber Uložit obrázek.</p><img src="${url}" alt="${esc(fn)}">`;
-  }else body=`<p>Přímé uložení tu není k dispozici. Zkopíruj obsah a ulož ho do souboru ${esc(fn)}.</p><label class="f"><textarea id="fbtxt" rows="8" readonly></textarea></label>`;
-  m.innerHTML=`<div class="card"><h2>Uložení souboru</h2>${body}<div class="row"><button type="button" class="btn" data-no>Zavřít</button></div></div>`;
-  if(typeof data==='string')$('#fbtxt',m).value=data;
-  m.hidden=false;const close=()=>{m.hidden=true;m.innerHTML='';};
+async function copyImage(){
+  try{
+    if(!navigator.clipboard||!window.ClipboardItem)throw new Error('no clipboard');
+    await navigator.clipboard.write([new ClipboardItem({'image/png':buildBlob('png')})]);
+    toast('Obrázek je ve schránce, vlož ho Ctrl+V');
+  }catch(e){toast('Kopírování tu prohlížeč nepovolil, použij uložení');}
+}
+function showFallback(fn,data,why){
+  const m=$('#modal'),isBlob=typeof data!=='string';let url='';
+  const body=isBlob
+    ?(url=URL.createObjectURL(data),`<img src="${url}" alt="${esc(fn)}"><p class="mono">Na počítači klikni na obrázek pravým tlačítkem a vyber Uložit obrázek jako. Na telefonu na něj podrž prst.</p>`)
+    :`<label class="f"><textarea id="fbtxt" rows="8" readonly></textarea></label><p class="mono">Zkopíruj obsah a ulož ho do souboru ${esc(fn)}.</p>`;
+  m.innerHTML=`<div class="card" role="dialog" aria-modal="true"><h2>Uložení souboru</h2><p>${esc(why||'')}</p>${body}
+    <div class="row"><button type="button" class="btn pri" data-retry>Zkusit uložit znovu</button>${isBlob?'<button type="button" class="btn" data-copy>Kopírovat obrázek</button>':'<button type="button" class="btn" data-copytxt>Kopírovat text</button>'}<button type="button" class="btn" data-no>Zavřít</button></div></div>`;
+  if(!isBlob)$('#fbtxt',m).value=data;
+  m.hidden=false;
+  const close=()=>{m.hidden=true;m.innerHTML='';if(url)URL.revokeObjectURL(url);};
   $('[data-no]',m).onclick=close;m.onclick=e=>{if(e.target===m)close();};
+  $('[data-retry]',m).onclick=async()=>{const ok=await saveFile(fn,data);if(ok)close();};
+  const c1=$('[data-copy]',m);if(c1)c1.onclick=copyImage;
+  const c2=$('[data-copytxt]',m);if(c2)c2.onclick=async()=>{try{await navigator.clipboard.writeText(data);toast('Zkopírováno');}catch(e){$('#fbtxt',m).select();toast('Označeno, zkopíruj ho Ctrl+C');}};
 }
+let saving=false;
 async function saveImage(){
-  const blob=await buildBlob();if(!blob){toast('Export se nepodařil');return;}
-  const nm=(exp.name||'miniatura').replace(/[^\w\- ]+/g,'').trim()||'miniatura';
-  await saveFile(`${nm}-${S.fmt.replace(':','x')}.${exp.fmt}`,blob);
+  if(saving)return;saving=true;
+  try{
+    toast('Připravuji soubor…');
+    const blob=await buildBlob();if(!blob){toast('Export se nepodařil');return;}
+    const nm=(exp.name||'miniatura').replace(/[^\p{L}\p{N}\- _]+/gu,'').trim()||'miniatura';
+    const bn=S.fmt==='banner',av=S.fmt==='avatar',base=nm==='miniatura'?(bn?'banner-kanalu':av?'profilovka-kanalu':nm):nm;
+    await saveFile(`${base}${bn||av?'':'-'+S.fmt.replace(':','x')}.${exp.fmt}`,blob);
+  }finally{saving=false;}
 }
 
 /* ---------- project: save, load, autosave ---------- */
@@ -1350,6 +1791,7 @@ async function loadProject(d){
   assets=as;imgCache.clear();next.forEach((v,k)=>imgCache.set(k,v));
   S={fmt:d.fmt,W:FORMATS[d.fmt].W,H:FORMATS[d.fmt].H,bg:Object.assign(defBg(),d.bg),objs:d.objs};
   selId=null;hist=[];hi=-1;
+  view.guides.banner=(S.fmt==='banner');view.guides.avatar=(S.fmt==='avatar');
   await fontsFor(S.objs);commit();view.zoom='fit';layout();renderPane();
 }
 $('#filePrj').onchange=async e=>{
@@ -1375,7 +1817,7 @@ function scheduleSave(){if(!booted)return;clearTimeout(saveT);saveT=setTimeout((
     const saved=await Promise.race([idb.get('cur'),new Promise(r=>setTimeout(()=>r(null),1500))]);
     if(saved){await loadProject(JSON.parse(saved));toast('Obnoven poslední projekt');}
   }catch(e){}
-  booted=true;
+  booted=true;getDL();
   await Promise.all(FONTS.map(f=>document.fonts.load(`400 40px "${f}"`,'Aáčďéěíňóřšťúůýž').catch(()=>{})));
   await fontsFor(S.objs);req();if(tab==='add')drawThumbs();
   document.fonts.ready.then(req);
