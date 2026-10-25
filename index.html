@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+
+  <head>
+    <meta charset=utf8>
+    <meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+    <link rel="stylesheet" href="style.css">
+  </head>
+
+  <body>
+    <title>Můstek Miniatur</title>
+    <meta name="claude:viewport-fit-sides" content="cover">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo+Black&family=Bangers&family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Bebas+Neue&family=JetBrains+Mono:wght@400;600&family=Lobster&family=Montserrat:ital,wght@0,400;0,700;0,800;0,900;1,700;1,900&family=Oswald:wght@400;500;700&family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Poppins:ital,wght@0,400;0,600;0,700;0,800;0,900;1,700&family=Roboto+Condensed:wght@400;700&display=swap">
+
+    <div id="app">
+      <header class="top">
+        <div class="brand"><i class="cap"></i><i class="cap b"></i><span>Můstek miniatur</span></div>
+        <div class="seg" role="group" aria-label="Formát plátna">
+          <button type="button" data-fmt="16:9" aria-pressed="true">16:9</button>
+          <button type="button" data-fmt="9:16" aria-pressed="false">9:16</button>
+          <button type="button" data-fmt="banner" aria-pressed="false" title="Banner kanálu 2560 × 1440">Banner</button>
+          <button type="button" data-fmt="avatar" aria-pressed="false" title="Profilovka kanálu 800 × 800">Profilovka</button>
+        </div>
+        <div class="grp">
+          <button type="button" class="btn ic" id="undo" title="Zpět (Ctrl+Z)" aria-label="Zpět"><svg class="i" viewBox="0 0 24 24">
+              <path d="M9 14 4 9l5-5" />
+              <path d="M4 9h10a6 6 0 0 1 0 12h-3" />
+            </svg></button>
+          <button type="button" class="btn ic" id="redo" title="Znovu (Ctrl+Y)" aria-label="Znovu"><svg class="i" viewBox="0 0 24 24">
+              <path d="m15 14 5-5-5-5" />
+              <path d="M20 9H10a6 6 0 0 0 0 12h3" />
+            </svg></button>
+        </div>
+        <span class="sp"></span>
+        <button type="button" class="btn" id="newp">Nový projekt</button>
+        <button type="button" class="btn pri" id="goExport">Uložit obrázek</button>
+      </header>
+      <div class="main">
+        <section class="stagewrap">
+          <div class="stage" id="stage">
+            <div class="cwrap" id="cwrap"><canvas id="cv"></canvas><canvas id="ov"></canvas></div>
+          </div>
+          <div class="statusbar">
+            <span class="mono" id="sizeinfo"></span>
+            <button type="button" class="chip" data-guide="thirds" aria-pressed="false">Třetiny</button>
+            <button type="button" class="chip" data-guide="center" aria-pressed="false">Středy</button>
+            <button type="button" class="chip" data-guide="safe" aria-pressed="false">Bezpečný okraj</button>
+            <button type="button" class="chip" data-guide="yt" data-only="video" aria-pressed="false">Rozhraní YouTube</button>
+            <button type="button" class="chip" data-guide="banner" data-only="banner" aria-pressed="false" hidden>Zóny banneru</button>
+            <button type="button" class="chip" data-guide="avatar" data-only="avatar" aria-pressed="false" hidden>Kruhová maska</button>
+            <div class="zoom">
+              <button type="button" class="btn sm" id="zout" aria-label="Oddálit">−</button>
+              <output class="mono" id="zval">Fit</output>
+              <button type="button" class="btn sm" id="zin" aria-label="Přiblížit">+</button>
+              <button type="button" class="btn sm" id="zfit">Přizpůsobit</button>
+            </div>
+          </div>
+        </section>
+        <aside class="panel">
+          <div class="tabs" role="tablist" id="tabs">
+            <button type="button" role="tab" data-tab="add" aria-selected="true">Přidat</button>
+            <button type="button" role="tab" data-tab="tpl" aria-selected="false">Šablony</button>
+            <button type="button" role="tab" data-tab="props" aria-selected="false">Úpravy</button>
+            <button type="button" role="tab" data-tab="layers" aria-selected="false">Vrstvy</button>
+            <button type="button" role="tab" data-tab="export" aria-selected="false">Export</button>
+          </div>
+          <div class="pane" id="pane"></div>
+        </aside>
+      </div>
+    </div>
+    <input type="file" id="fileImg" accept="image/*" multiple hidden>
+    <input type="file" id="fileBg" accept="image/*" hidden>
+    <input type="file" id="filePrj" accept=".json,application/json" hidden>
+    <div id="toast" class="toast" hidden></div>
+    <div id="modal" class="modal" hidden></div>
+
+    <script src="script.js"></script>
+  </body>
+
+</html>
